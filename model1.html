@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>model1-viewer</title>
+<link rel="icon" href="Picsart_26-03-05_10-40-33-411 (1).png">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{margin:0;overflow:hidden;background:#111;font-family:Arial}
+
+#ui{
+position:absolute;
+top:10px;
+left:10px;
+background:rgba(0,0,0,0.7);
+color:white;
+padding:15px;
+border-radius:10px;
+}
+
+#chartBox{
+position:absolute;
+bottom:0;
+left:0;
+width:100%;
+height:220px;
+background:white;
+}
+
+label{font-size:13px}
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+
+<h3>Seismic Control Panel</h3>
+
+Magnitude  
+<input type="range" id="mag" min="0" max="5" step="0.1" value="1"><br>
+
+Damping  
+<input type="range" id="damp" min="0" max="2" step="0.05" value="0.5"><br>
+
+Stiffness  
+<input type="range" id="stiff" min="0" max="5" step="0.1" value="2"><br><br>
+
+<button onclick="running=true">Start</button>
+<button onclick="running=false">Stop</button>
+
+</div>
+
+<div id="chartBox">
+<canvas id="graph"></canvas>
+</div>
+
+<script>
+
+// ---------- THREE JS SCENE ----------
+
+let scene = new THREE.Scene()
+
+let camera = new THREE.PerspectiveCamera(
+70,
+window.innerWidth/window.innerHeight,
+0.1,
+1000
+)
+
+camera.position.set(18,12,18)
+camera.lookAt(0,3,0)
+
+let renderer = new THREE.WebGLRenderer({antialias:true})
+renderer.setSize(window.innerWidth,window.innerHeight)
+document.body.appendChild(renderer.domElement)
+
+
+// LIGHTING
+
+scene.add(new THREE.AmbientLight(0x404040))
+
+let sun = new THREE.DirectionalLight(0xffffff,1)
+sun.position.set(20,30,20)
+scene.add(sun)
+
+
+// ---------- TERRAIN ----------
+
+let terrainGeo = new THREE.PlaneGeometry(80,80,120,120)
+let terrainMat = new THREE.MeshStandardMaterial({color:0x2e8b57})
+
+let terrain = new THREE.Mesh(terrainGeo,terrainMat)
+terrain.rotation.x = -Math.PI/2
+scene.add(terrain)
+
+
+// ---------- EARTHQUAKE EPICENTER ----------
+
+let epiGeo = new THREE.SphereGeometry(0.6,32,32)
+let epiMat = new THREE.MeshStandardMaterial({color:0xff0000})
+
+let epicenter = new THREE.Mesh(epiGeo,epiMat)
+epicenter.position.set(-10,0.5,-10)
+
+scene.add(epicenter)
+
+
+// ---------- BASE ISOLATION BEARINGS ----------
+
+let bearings = []
+
+for(let i=-2;i<=2;i+=4){
+for(let j=-2;j<=2;j+=4){
+
+let g = new THREE.Group()
+
+// rubber layers
+for(let k=0;k<4;k++){
+
+let geo = new THREE.CylinderGeometry(0.4,0.4,0.15,32)
+let mat = new THREE.MeshStandardMaterial({color:0x222})
+
+let layer = new THREE.Mesh(geo,mat)
+layer.position.y = k*0.25
+
+g.add(layer)
+
+}
+
+// lead core
+let coreGeo = new THREE.CylinderGeometry(0.15,0.15,1,32)
+let coreMat = new THREE.MeshStandardMaterial({color:0xffaa00})
+
+let core = new THREE.Mesh(coreGeo,coreMat)
+core.position.y = 0.4
+g.add(core)
+
+g.position.set(i,0.4,j)
+
+scene.add(g)
+
+bearings.push(g)
+
+}
+}
+
+
+// ---------- SKYSCRAPER ----------
+
+let building = new THREE.Group()
+
+for(let i=0;i<12;i++){
+
+let geo = new THREE.BoxGeometry(4,0.7,4)
+
+let mat = new THREE.MeshPhysicalMaterial({
+color:0x66ccff,
+transparent:true,
+opacity:0.65,
+metalness:0.2,
+roughness:0.1
+})
+
+let floor = new THREE.Mesh(geo,mat)
+
+floor.position.y = 1.5 + i*0.8
+
+building.add(floor)
+
+}
+
+scene.add(building)
+
+
+// ---------- GRAPH ----------
+
+let ctx = document.getElementById("graph")
+
+let chart = new Chart(ctx,{
+type:'line',
+data:{
+labels:[],
+datasets:[
+{label:'Displacement',borderColor:'red',data:[]},
+{label:'Velocity',borderColor:'blue',data:[]}
+]
+},
+options:{animation:false,responsive:true}
+})
+
+
+// ---------- PHYSICS VARIABLES ----------
+
+let t=0
+let x=0
+let v=0
+let a=0
+let running=false
+
+
+// ---------- SIMULATION ----------
+
+function animate(){
+
+requestAnimationFrame(animate)
+
+if(running){
+
+let mag = parseFloat(magInput.value)
+let c = parseFloat(dampInput.value)
+let k = parseFloat(stiffInput.value)
+
+
+// seismic wave propagation
+
+let pos = terrain.geometry.attributes.position
+
+for(let i=0;i<pos.count;i++){
+
+let px = pos.getX(i)
+let py = pos.getY(i)
+
+let dx = px - epicenter.position.x
+let dy = py - epicenter.position.z
+
+let dist = Math.sqrt(dx*dx + dy*dy)
+
+let wave = Math.sin(dist*1.5 - t*4) * 0.3 * mag
+
+pos.setZ(i,wave)
+
+}
+
+pos.needsUpdate = true
+
+
+// base isolation physics
+
+let ground = mag*Math.sin(3*t)
+
+a = (-c*v - k*(x-ground))
+
+v += a*0.02
+x += v*0.02
+
+building.position.x = x
+building.rotation.z = x*0.1
+
+bearings.forEach(b=>{
+b.position.x = ground*0.8
+})
+
+
+// graph update
+
+chart.data.labels.push("")
+chart.data.datasets[0].data.push(x)
+chart.data.datasets[1].data.push(v)
+
+if(chart.data.labels.length>60){
+
+chart.data.labels.shift()
+chart.data.datasets.forEach(d=>d.data.shift())
+
+}
+
+chart.update()
+
+t+=0.02
+
+}
+
+renderer.render(scene,camera)
+
+}
+
+animate()
+
+
+// UI references
+
+let magInput = document.getElementById("mag")
+let dampInput = document.getElementById("damp")
+let stiffInput = document.getElementById("stiff")
+
+</script>
+
+</body>
+</html>

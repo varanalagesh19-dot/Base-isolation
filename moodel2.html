@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>model2-viewer</title>
+    <link rel="icon" href="Picsart_26-03-05_10-40-33-411 (1).png">
+    <!-- Three.js & controls -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 12px 20px;
+            border-radius: 8px;
+            pointer-events: none;
+            z-index: 10;
+            border-left: 4px solid #ffaa00;
+        }
+        #controls-panel {
+            position: absolute;
+            bottom: 30px;
+            left: 20px;
+            background: rgba(30, 30, 40, 0.85);
+            backdrop-filter: blur(8px);
+            color: #eee;
+            padding: 20px;
+            border-radius: 12px;
+            width: 280px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+            border: 1px solid #444;
+            z-index: 20;
+            pointer-events: all;
+            font-size: 14px;
+        }
+        #controls-panel h3 { margin: 0 0 15px 0; text-align: center; color: #ffaa00; font-weight: 400; letter-spacing: 1px; }
+        .slider-group { margin-bottom: 15px; }
+        .slider-group label { display: flex; justify-content: space-between; }
+        input[type=range] { width: 100%; margin: 8px 0; background: #555; height: 4px; border-radius: 2px; -webkit-appearance: none; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #ffaa00; cursor: pointer; }
+        .button-row { display: flex; gap: 10px; margin-top: 10px; }
+        button { flex: 1; background: #2a2a3a; border: 1px solid #555; color: white; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #3d3d5a; border-color: #ffaa00; }
+        #chart-container {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            width: 400px;
+            height: 200px;
+            background: rgba(20,20,30,0.75);
+            backdrop-filter: blur(5px);
+            border-radius: 12px;
+            padding: 10px;
+            border: 1px solid #444;
+            z-index: 15;
+            pointer-events: none;
+        }
+        #status { color: #ffaa00; font-weight: bold; margin-top: 10px; text-align: center; }
+        .note { font-size: 12px; color: #aaa; text-align: center; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>🏗️ Base Isolation Systems | Earthquake Engineering Demo</h2>
+        <p>LRB • FPS • Viscous Damper • HDRB | Drag to rotate | Scroll to zoom</p>
+    </div>
+    <div id="controls-panel">
+        <h3>⚙️ SIMULATION CONTROLS</h3>
+        <div class="slider-group">
+            <label>📈 Earthquake Magnitude <span id="mag-val">0.8</span></label>
+            <input type="range" id="mag-slider" min="0" max="1.5" step="0.01" value="0.8">
+        </div>
+        <div class="slider-group">
+            <label>🛢️ Damping Coefficient <span id="damp-val">0.45</span></label>
+            <input type="range" id="damp-slider" min="0.1" max="1.2" step="0.01" value="0.45">
+        </div>
+        <div class="slider-group">
+            <label>🔩 Isolation Stiffness <span id="stiff-val">0.6</span></label>
+            <input type="range" id="stiff-slider" min="0.2" max="1.5" step="0.01" value="0.6">
+        </div>
+        <div class="button-row">
+            <button id="btn-start">▶ START</button>
+            <button id="btn-stop">⏹️ STOP</button>
+        </div>
+        <div id="status">🟢 SIMULATING</div>
+        <div class="note">Lead core yielding • Rubber shear • FPS sliding • Fluid damping</div>
+    </div>
+    <div id="chart-container">
+        <canvas id="dispChart"></canvas>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- SETUP SCENE ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111822);
+        // Fog for depth
+        scene.fog = new THREE.Fog(0x111822, 20, 60);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(12, 8, 18);
+        camera.lookAt(0, 2, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2.2; // prevent going under ground
+        controls.target.set(0, 3, 0);
+        controls.enableZoom = true;
+
+        // Lighting
+        // Ambient
+        const ambient = new THREE.AmbientLight(0x404060);
+        scene.add(ambient);
+
+        // Key light (sun)
+        const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+        sunLight.position.set(10, 20, 5);
+        sunLight.castShadow = true;
+        sunLight.receiveShadow = true;
+        sunLight.shadow.mapSize.width = 1024;
+        sunLight.shadow.mapSize.height = 1024;
+        const d = 25;
+        sunLight.shadow.camera.left = -d;
+        sunLight.shadow.camera.right = d;
+        sunLight.shadow.camera.top = d;
+        sunLight.shadow.camera.bottom = -d;
+        sunLight.shadow.camera.near = 1;
+        sunLight.shadow.camera.far = 50;
+        scene.add(sunLight);
+
+        // Fill light
+        const fillLight = new THREE.PointLight(0x446688, 0.8);
+        fillLight.position.set(-5, 5, 10);
+        scene.add(fillLight);
+
+        // Grid / ground plane
+        const gridHelper = new THREE.GridHelper(30, 20, 0x88aaff, 0x335588);
+        gridHelper.position.y = 0;
+        scene.add(gridHelper);
+
+        // Concrete base platform (large slab)
+        const basePlateGeo = new THREE.BoxGeometry(18, 0.4, 8);
+        const basePlateMat = new THREE.MeshStandardMaterial({ color: 0x6a6a7a, roughness: 0.7, metalness: 0.1 });
+        const basePlate = new THREE.Mesh(basePlateGeo, basePlateMat);
+        basePlate.position.set(0, 0, 0);
+        basePlate.receiveShadow = true;
+        basePlate.castShadow = true;
+        scene.add(basePlate);
+
+        // Ground motion plate (thin slab that moves)
+        const movingPlateGeo = new THREE.BoxGeometry(17, 0.2, 7);
+        const movingPlateMat = new THREE.MeshStandardMaterial({ color: 0x8a9bb2, emissive: 0x112233 });
+        const movingPlate = new THREE.Mesh(movingPlateGeo, movingPlateMat);
+        movingPlate.position.set(0, 0.3, 0);
+        movingPlate.receiveShadow = true;
+        movingPlate.castShadow = true;
+        scene.add(movingPlate);
+
+        // --- HELPER FUNCTIONS FOR COMPONENTS (grouped per isolator) ---
+
+        // All isolator groups will be placed along X: -6, -2, 2, 6
+        const isolators = [];
+
+        // 1. Lead-Rubber Bearing (LRB) at x = -6
+        function createLRB(posX) {
+            const group = new THREE.Group();
+            group.position.set(posX, 0.5, -1.5); // z offset for better view
+
+            // Outer transparent shell (cutaway view)
+            const shellGeo = new THREE.CylinderGeometry(1.1, 1.1, 1.6, 32, 1, true);
+            const shellMat = new THREE.MeshPhongMaterial({ color: 0xaaccff, transparent: true, opacity: 0.2, wireframe: false, side: THREE.DoubleSide });
+            const shell = new THREE.Mesh(shellGeo, shellMat);
+            shell.position.y = 0.8;
+            shell.castShadow = true;
+            shell.receiveShadow = true;
+            group.add(shell);
+
+            // Rubber layers (alternating black/gray)
+            const layers = 6;
+            for (let i = 0; i < layers; i++) {
+                const y = 0.2 + i * 0.24;
+                const layerGeo = new THREE.CylinderGeometry(0.9, 0.9, 0.1, 24);
+                const layerMat = new THREE.MeshStandardMaterial({ color: i % 2 === 0 ? 0x333333 : 0x888888, roughness: 0.8 });
+                const layer = new THREE.Mesh(layerGeo, layerMat);
+                layer.position.y = y;
+                layer.castShadow = true;
+                layer.receiveShadow = true;
+                group.add(layer);
+            }
+
+            // Lead core (central cylinder)
+            const coreGeo = new THREE.CylinderGeometry(0.3, 0.3, 1.5, 16);
+            const coreMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8, roughness: 0.2, emissive: new THREE.Color(0x222222) });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            core.position.y = 0.75;
+            core.castShadow = true;
+            core.receiveShadow = true;
+            group.add(core);
+
+            // Top and bottom steel plates
+            const plateGeo = new THREE.CylinderGeometry(1.1, 1.1, 0.1, 24);
+            const plateMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.9, roughness: 0.3 });
+            const bottomPlate = new THREE.Mesh(plateGeo, plateMat);
+            bottomPlate.position.y = 0.05;
+            bottomPlate.castShadow = true;
+            bottomPlate.receiveShadow = true;
+            group.add(bottomPlate);
+
+            const topPlate = new THREE.Mesh(plateGeo, plateMat);
+            topPlate.position.y = 1.55;
+            topPlate.castShadow = true;
+            topPlate.receiveShadow = true;
+            group.add(topPlate);
+
+            // Column above
+            const columnGeo = new THREE.BoxGeometry(0.8, 2.0, 0.8);
+            const columnMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.4 });
+            const column = new THREE.Mesh(columnGeo, columnMat);
+            column.position.set(0, 2.6, 0);
+            column.castShadow = true;
+            column.receiveShadow = true;
+            group.add(column);
+
+            // Store rubber layers for deformation animation
+            group.userData = { rubberLayers: [], core: core, type: 'LRB' };
+            // collect rubber layers (excluding plates and shell)
+            group.children.forEach(child => {
+                if (child.material && Array.isArray(child.material) === false && child.material.color && child.material.color.getHex() === 0x333333 || child.material?.color?.getHex() === 0x888888) {
+                    group.userData.rubberLayers.push(child);
+                }
+            });
+            return group;
+        }
+
+        // 2. Friction Pendulum System (FPS) at x = -2
+        function createFPS(posX) {
+            const group = new THREE.Group();
+            group.position.set(posX, 0.5, -1.5);
+
+            // Spherical sliding surface (concave) - represented by a transparent sphere section
+            const sphereGeo = new THREE.SphereGeometry(1.6, 32, 16, 0, Math.PI*2, 0, 0.5);
+            const sphereMat = new THREE.MeshPhongMaterial({ color: 0x88aadd, wireframe: false, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+            const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+            sphere.scale.set(1, 0.3, 1);
+            sphere.position.y = 0.7;
+            sphere.receiveShadow = true;
+            group.add(sphere);
+
+            // Slider (articulated pendulum)
+            const sliderGroup = new THREE.Group();
+            const sliderBallGeo = new THREE.SphereGeometry(0.4, 24);
+            const sliderBallMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 });
+            const sliderBall = new THREE.Mesh(sliderBallGeo, sliderBallMat);
+            sliderBall.position.y = 1.0;
+            sliderBall.castShadow = true;
+            sliderBall.receiveShadow = true;
+            sliderGroup.add(sliderBall);
+
+            const armGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.0, 8);
+            const armMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+            const arm = new THREE.Mesh(armGeo, armMat);
+            arm.position.y = 1.6;
+            arm.castShadow = true;
+            sliderGroup.add(arm);
+
+            const topPlate = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.6), new THREE.MeshStandardMaterial({ color: 0xcccccc }));
+            topPlate.position.y = 2.1;
+            topPlate.castShadow = true;
+            sliderGroup.add(topPlate);
+
+            group.add(sliderGroup);
+            
+            // Column
+            const column = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+            column.position.set(0, 3.0, 0);
+            column.castShadow = true;
+            group.add(column);
+
+            group.userData = { slider: sliderGroup, type: 'FPS' };
+            return group;
+        }
+
+        // 3. Viscous Damper at x = 2
+        function createViscousDamper(posX) {
+            const group = new THREE.Group();
+            group.position.set(posX, 1.0, -1.5);
+
+            // Cylinder housing (transparent)
+            const housingGeo = new THREE.CylinderGeometry(0.9, 0.9, 2.4, 24, 1, true);
+            const housingMat = new THREE.MeshPhongMaterial({ color: 0x88aadd, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+            const housing = new THREE.Mesh(housingGeo, housingMat);
+            housing.position.y = 1.2;
+            housing.castShadow = true;
+            group.add(housing);
+
+            // Fluid (inner semi-transparent)
+            const fluidGeo = new THREE.CylinderGeometry(0.7, 0.7, 2.0, 24);
+            const fluidMat = new THREE.MeshStandardMaterial({ color: 0x3399ff, emissive: 0x112233, transparent: true, opacity: 0.4 });
+            const fluid = new THREE.Mesh(fluidGeo, fluidMat);
+            fluid.position.y = 1.2;
+            fluid.castShadow = true;
+            group.add(fluid);
+
+            // Piston rod
+            const rodGeo = new THREE.CylinderGeometry(0.2, 0.2, 2.0, 8);
+            const rodMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.9 });
+            const rod = new THREE.Mesh(rodGeo, rodMat);
+            rod.position.y = 1.2;
+            rod.castShadow = true;
+            group.add(rod);
+
+            // Piston head (inside)
+            const headGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.3, 16);
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
+            const head = new THREE.Mesh(headGeo, headMat);
+            head.position.y = 1.2;
+            head.castShadow = true;
+            group.add(head);
+
+            // End plates
+            const endCapMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+            const cap1 = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.2), endCapMat);
+            cap1.position.y = 0.1;
+            cap1.castShadow = true;
+            group.add(cap1);
+            const cap2 = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.2), endCapMat);
+            cap2.position.y = 2.3;
+            cap2.castShadow = true;
+            group.add(cap2);
+
+            // Column
+            const column = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 0.8), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+            column.position.set(0, 3.2, 0);
+            column.castShadow = true;
+            group.add(column);
+
+            group.userData = { piston: rod, head: head, type: 'VD' };
+            return group;
+        }
+
+        // 4. High Damping Rubber Bearing (HDRB) at x = 6
+        function createHDRB(posX) {
+            const group = new THREE.Group();
+            group.position.set(posX, 0.5, -1.5);
+
+            // Outer transparent
+            const shellGeo = new THREE.CylinderGeometry(1.1, 1.1, 1.8, 32, 1, true);
+            const shellMat = new THREE.MeshPhongMaterial({ color: 0xaaccff, transparent: true, opacity: 0.2 });
+            const shell = new THREE.Mesh(shellGeo, shellMat);
+            shell.position.y = 0.9;
+            shell.castShadow = true;
+            group.add(shell);
+
+            // Rubber layers with steel plates (thicker appearance)
+            for (let i = 0; i < 7; i++) {
+                const y = 0.15 + i * 0.25;
+                // rubber
+                const rubberGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.12, 24);
+                const rubberMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 });
+                const rubber = new THREE.Mesh(rubberGeo, rubberMat);
+                rubber.position.y = y;
+                rubber.castShadow = true;
+                group.add(rubber);
+                // steel shim
+                const shimGeo = new THREE.CylinderGeometry(0.98, 0.98, 0.04, 24);
+                const shimMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, metalness: 0.8 });
+                const shim = new THREE.Mesh(shimGeo, shimMat);
+                shim.position.y = y + 0.08;
+                shim.castShadow = true;
+                group.add(shim);
+            }
+
+            // Top/bottom plates
+            const plateMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+            const bottom = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.1), plateMat);
+            bottom.position.y = 0.05;
+            bottom.castShadow = true;
+            group.add(bottom);
+            const top = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.1), plateMat);
+            top.position.y = 1.75;
+            top.castShadow = true;
+            group.add(top);
+
+            const column = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 0.8), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+            column.position.set(0, 2.8, 0);
+            column.castShadow = true;
+            group.add(column);
+
+            group.userData = { rubberLayers: group.children.filter(c => c.material && c.material.color && c.material.color.getHex() === 0x444444), type: 'HDRB' };
+            return group;
+        }
+
+        // Create all isolators
+        const lrb = createLRB(-6);
+        scene.add(lrb);
+        isolators.push(lrb);
+
+        const fps = createFPS(-2);
+        scene.add(fps);
+        isolators.push(fps);
+
+        const vd = createViscousDamper(2);
+        scene.add(vd);
+        isolators.push(vd);
+
+        const hdrb = createHDRB(6);
+        scene.add(hdrb);
+        isolators.push(hdrb);
+
+        // Add small labels (CSS2DRenderer not strictly needed but we can skip for brevity, use simpler)
+
+        // --- GROUND MOTION & ANIMATION STATE ---
+        let clock = new THREE.Clock();
+        let time = 0;
+        let simulating = true;
+        let magnitude = 0.8;
+        let damping = 0.45;
+        let stiffness = 0.6;
+
+        // UI bindings
+        document.getElementById('mag-slider').addEventListener('input', e => { magnitude = parseFloat(e.target.value); document.getElementById('mag-val').innerText = magnitude.toFixed(2); });
+        document.getElementById('damp-slider').addEventListener('input', e => { damping = parseFloat(e.target.value); document.getElementById('damp-val').innerText = damping.toFixed(2); });
+        document.getElementById('stiff-slider').addEventListener('input', e => { stiffness = parseFloat(e.target.value); document.getElementById('stiff-val').innerText = stiffness.toFixed(2); });
+        document.getElementById('btn-start').addEventListener('click', () => { simulating = true; document.getElementById('status').innerHTML = '🟢 SIMULATING'; });
+        document.getElementById('btn-stop').addEventListener('click', () => { simulating = false; document.getElementById('status').innerHTML = '🔴 STOPPED'; });
+
+        // Chart.js setup
+        const ctx = document.getElementById('dispChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array.from({ length: 50 }, (_, i) => i),
+                datasets: [{
+                    label: 'Ground Displacement (mm)',
+                    data: Array(50).fill(0),
+                    borderColor: '#ffaa00',
+                    backgroundColor: 'rgba(255,170,0,0.1)',
+                    tension: 0.3
+                }]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { y: { min: -2, max: 2, grid: { color: '#333' } } },
+                plugins: { legend: { labels: { color: '#ccc' } } }
+            }
+        });
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            if (simulating) {
+                time += delta * 1.5; // speed factor
+            }
+
+            // Ground motion (sinusoidal with magnitude)
+            const groundX = Math.sin(time * 2.0) * magnitude * 1.2 + Math.sin(time * 1.3) * 0.3 * magnitude;
+            // Add damping and stiffness influence (stiffness reduces amplitude, damping phase shift)
+            const effectiveAmp = magnitude * (1.2 - damping * 0.3) * stiffness;
+            const isolatorX = Math.sin(time * 2.0 + damping * 0.5) * effectiveAmp * 0.6; // relative motion
+
+            // Move ground plate
+            movingPlate.position.x = groundX * 0.5; // visual
+
+            // Update isolators internal motion
+            // LRB: shear deformation (rubber layers tilt)
+            lrb.userData.rubberLayers.forEach((layer, idx) => {
+                // shear offset based on height
+                const y = layer.position.y;
+                const shear = Math.sin(time * 2.0 + idx) * magnitude * 0.5 * (y/1.5);
+                layer.position.x = shear * 0.8;
+                // lead core yielding: change color slightly
+                if (lrb.userData.core) {
+                    const intensity = 0.5 + Math.abs(Math.sin(time * 4)) * 0.5;
+                    lrb.userData.core.material.emissive.setHSL(0.1, 1, intensity * 0.2);
+                }
+            });
+
+            // FPS: pendulum motion
+            const fpsSlider = fps.userData.slider;
+            if (fpsSlider) {
+                // sliding along curved surface (simulate offset)
+                fpsSlider.position.x = Math.sin(time * 2.2) * magnitude * 1.0;
+                fpsSlider.position.z = Math.cos(time * 1.8) * magnitude * 0.3; // some 3D effect
+            }
+
+            // Viscous damper: piston movement proportional to velocity (derivative of ground)
+            const pistonSpeed = Math.cos(time * 2.0) * magnitude * 1.5 * damping;
+            vd.userData.piston.position.y = 1.2 + pistonSpeed * 0.3;
+            vd.userData.head.position.y = 1.2 + pistonSpeed * 0.3;
+
+            // HDRB: rubber layers deform
+            hdrb.userData.rubberLayers.forEach((layer, idx) => {
+                layer.position.x = Math.sin(time * 2.5 + idx) * magnitude * 0.6 * (idx/3);
+            });
+
+            // Update chart
+            const data = chart.data.datasets[0].data;
+            data.shift();
+            data.push(groundX);
+            chart.update();
+
+            // Move entire isolator groups? For simplicity we keep them fixed, but move the internal components. 
+            // For extra effect, translate base of each group slightly? Actually we move internal parts.
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Resize handler
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Additional environment: concrete columns / background
+        const backWall = new THREE.Mesh(new THREE.BoxGeometry(30, 10, 1), new THREE.MeshStandardMaterial({ color: 0x2a3a4a }));
+        backWall.position.set(0, 3, -8);
+        backWall.receiveShadow = true;
+        scene.add(backWall);
+
+        // Some floating nodes to indicate motion
+        console.log('Base Isolation Simulation Loaded');
+    </script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<style>
+body{
+  
+}
+ header {
+        padding: 00px;
+        background: rgba(80, 119, 228, 0.3);
+        backdrop-filter: blur(8px);
+    }
+   .title{
+    position: absolute;
+    top: -300px;   /* move it higher */
+    left: 50%;
+    transform: translateX(-50%);
+    margin-left: 220px;
+}
+h1{
+    font-size: 400%;
+}
+  ol{
+      position: absolute;
+    top: 300px;   /* move it higher */
+    left: 70%;
+    right: 50;
+    transform: translateX(-50%);
+    margin-left: 30px
+  }
+button{
+     padding: 10px 20px;
+            background: #c5d148;
+            border: none;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+}
+
+    section {
+        margin-top: 300px;
+    }
